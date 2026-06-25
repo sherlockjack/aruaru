@@ -3,22 +3,21 @@ from tkinter import ttk, messagebox
 import tkinter.scrolledtext as scrolledtext
 import subprocess
 import threading
+import sys
 
 class GCloudGUI:
     def __init__(self, root):
         self.root = root
         self.root.title("GCloud GUI Manager")
-        self.root.geometry("550x700") # Dipertinggi untuk tempat terminal
+        self.root.geometry("600x700") 
         self.root.configure(bg="#F3F3F3") 
         
-        # Konfigurasi Font
         self.font_title = ("Segoe UI", 16, "bold")
         self.font_label = ("Segoe UI", 10)
         self.font_project = ("Segoe UI", 11, "bold")
         self.font_btn = ("Segoe UI", 9)
-        self.font_term = ("Consolas", 9) # Font khas terminal
+        self.font_term = ("Consolas", 10)
 
-        # Style
         self.style = ttk.Style()
         self.style.theme_use('clam')
         
@@ -30,6 +29,7 @@ class GCloudGUI:
         # --- DATA & STATE ---
         self.all_projects = []
         self.filtered_projects = []
+        self.current_process = None # Menyimpan proses terminal yang sedang berjalan
 
         # --- UI ELEMENTS ---
         main_frame = tk.Frame(root, bg="#F3F3F3")
@@ -72,11 +72,9 @@ class GCloudGUI:
         term_container = tk.Frame(main_frame, bg="#1E1E1E", bd=1, relief=tk.SUNKEN)
         term_container.pack(fill=tk.BOTH, expand=True, pady=(20, 0))
 
-        # Terminal Output Screen
         self.term_output = scrolledtext.ScrolledText(term_container, bg="#1E1E1E", fg="#CCCCCC", font=self.font_term, state=tk.DISABLED, wrap=tk.WORD, bd=0)
         self.term_output.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         
-        # Terminal Input Box
         input_frame = tk.Frame(term_container, bg="#1E1E1E")
         input_frame.pack(fill=tk.X, side=tk.BOTTOM, padx=5, pady=(0, 5))
         tk.Label(input_frame, text="> ", bg="#1E1E1E", fg="#00FF00", font=self.font_term).pack(side=tk.LEFT)
@@ -85,10 +83,10 @@ class GCloudGUI:
         self.cmd_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
         self.cmd_entry.bind("<Return>", self.execute_terminal_cmd)
 
-        self.append_to_terminal("GCloud GUI Manager Terminal Initialized.\nType any command and press Enter.\n")
+        self.append_to_terminal("GCloud Live Terminal Ready.\nDeployments and live logs will stream here.\n")
         self.refresh_data()
 
-    # --- TERMINAL LOGIC ---
+    # --- LIVE TERMINAL LOGIC ---
     def append_to_terminal(self, text):
         self.term_output.config(state=tk.NORMAL)
         self.term_output.insert(tk.END, text)
@@ -97,23 +95,50 @@ class GCloudGUI:
 
     def execute_terminal_cmd(self, event):
         cmd = self.cmd_entry.get()
-        if not cmd.strip():
+        if not cmd:
             return
         
         self.cmd_entry.delete(0, tk.END)
-        self.append_to_terminal(f"\n> {cmd}\n")
-        threading.Thread(target=self._run_terminal_thread, args=(cmd,), daemon=True).start()
-
-    def _run_terminal_thread(self, cmd):
-        try:
-            result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
-            output = result.stdout + result.stderr
-            if not output:
-                output = "[Command finished with no output]\n"
-        except Exception as e:
-            output = f"Error: {str(e)}\n"
         
-        self.root.after(0, lambda: self.append_to_terminal(output))
+        # Jika ada command yang lagi jalan (misal nunggu Y/n)
+        if self.current_process and self.current_process.poll() is None:
+            self.append_to_terminal(f"{cmd}\n") # Echo input user
+            try:
+                # Kirim input ke command yang lagi jalan
+                self.current_process.stdin.write(cmd + "\n")
+                self.current_process.stdin.flush()
+            except Exception as e:
+                self.append_to_terminal(f"\n[System Error writing to stdin: {e}]\n")
+        else:
+            # Mulai command baru
+            self.append_to_terminal(f"\n> {cmd}\n")
+            threading.Thread(target=self._run_live_terminal_thread, args=(cmd,), daemon=True).start()
+
+    def _run_live_terminal_thread(self, cmd):
+        try:
+            # Gunakan Popen untuk streaming output real-time dan buka jalur input (stdin)
+            self.current_process = subprocess.Popen(
+                cmd,
+                shell=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                stdin=subprocess.PIPE,
+                text=True,
+                bufsize=1, # Line buffered
+                universal_newlines=True
+            )
+            
+            # Baca output baris demi baris saat proses berjalan
+            for line in self.current_process.stdout:
+                self.root.after(0, lambda l=line: self.append_to_terminal(l))
+                
+            self.current_process.wait()
+            self.root.after(0, lambda: self.append_to_terminal(f"[Process finished with code {self.current_process.returncode}]\n"))
+            self.current_process = None
+            
+        except Exception as e:
+            self.root.after(0, lambda err=str(e): self.append_to_terminal(f"Error: {err}\n"))
+            self.current_process = None
 
     # --- CORE GCLOUD LOGIC ---
     def run_gcloud(self, command):
