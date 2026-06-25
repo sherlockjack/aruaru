@@ -31,7 +31,7 @@ class GCloudGUI:
         self.all_projects = []
         self.filtered_projects = []
         
-        # --- UI ELEMENTS --- (Sama seperti sebelumnya)
+        # --- UI ELEMENTS ---
         main_frame = tk.Frame(root, bg="#F3F3F3")
         main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=(20, 10))
 
@@ -48,15 +48,20 @@ class GCloudGUI:
         search_frame.pack(fill=tk.X, pady=(5, 0))
         tk.Label(search_frame, text="🔍", font=self.font_label, bg="#F3F3F3").pack(side=tk.LEFT, padx=(5, 5))
         
+        # FIX ERROR 1: Buat project_combo DULU sebelum bikin trigger search_var
+        self.project_combo = ttk.Combobox(main_frame, font=self.font_label, state="readonly")
+        
         self.search_var = tk.StringVar()
-        self.search_var.trace_add("write", self.filter_projects)
         self.search_entry = ttk.Entry(search_frame, textvariable=self.search_var, font=self.font_label)
         self.search_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
         self.search_entry.insert(0, "Search Projects...")
+        
+        # Trigger dipasang SETELAH placeholder terisi, biar nggak error
+        self.search_var.trace_add("write", self.filter_projects)
+        
         self.search_entry.bind('<FocusIn>', self.clear_placeholder)
         self.search_entry.bind('<FocusOut>', self.add_placeholder)
         
-        self.project_combo = ttk.Combobox(main_frame, font=self.font_label, state="readonly")
         self.project_combo.pack(fill=tk.X, pady=(5, 15))
         
         btn_frame = tk.Frame(main_frame, bg="#F3F3F3")
@@ -75,9 +80,9 @@ class GCloudGUI:
         input_frame = tk.Frame(term_container, bg="#1E1E1E")
         input_frame.pack(fill=tk.X, side=tk.BOTTOM, padx=5, pady=(0, 5))
         
-        # Label ">" dihilangkan karena prompt asli dari cmd (C:\...>) bakal muncul di output layar atas
+        # FIX ERROR 2: Pakai tk.LEFT, bukan LEFT
         self.cmd_entry = tk.Entry(input_frame, bg="#333333", fg="#00FF00", font=self.font_term, insertbackground="white", bd=1)
-        self.cmd_entry.pack(side=LEFT, fill=tk.X, expand=True)
+        self.cmd_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
         self.cmd_entry.bind("<Return>", self.execute_terminal_cmd)
 
         self.refresh_data()
@@ -85,16 +90,14 @@ class GCloudGUI:
         # --- START REAL NATIVE TERMINAL SESSION ---
         self.output_queue = queue.Queue()
         self.start_persistent_shell()
-        self.root.after(50, self.process_queue_to_gui) # Polling update GUI
+        self.root.after(50, self.process_queue_to_gui) 
 
     # --- PERSISTENT NATIVE SHELL LOGIC ---
     def start_persistent_shell(self):
-        """Memulai satu proses cmd.exe asli yang hidup terus selama GUI terbuka"""
         kwargs = {}
         if sys.platform == "win32":
-            kwargs['creationflags'] = 0x08000000 # Menyembunyikan jendela cmd asli
+            kwargs['creationflags'] = 0x08000000 
 
-        # Gunakan cmd.exe bawaan sistem
         shell_exe = os.environ.get("COMSPEC", "cmd.exe")
         
         self.shell_process = subprocess.Popen(
@@ -107,19 +110,16 @@ class GCloudGUI:
             **kwargs
         )
         
-        # Baca output cmd secara live dari thread terpisah
         threading.Thread(target=self._read_shell_output, daemon=True).start()
 
     def _read_shell_output(self):
-        """Membaca setiap karakter dari cmd.exe (termasuk prompt) lalu kirim ke queue"""
         while True:
             char = self.shell_process.stdout.read(1)
-            if not char: # Jika shell mati
+            if not char: 
                 break
             self.output_queue.put(char)
 
     def process_queue_to_gui(self):
-        """Memindahkan text dari antrean ke dalam ScrolledText tanpa bikin GUI hang"""
         chars = []
         while not self.output_queue.empty():
             chars.append(self.output_queue.get())
@@ -130,22 +130,18 @@ class GCloudGUI:
             self.term_output.see(tk.END)
             self.term_output.config(state=tk.DISABLED)
             
-        # Panggil lagi fungsi ini 50 milidetik kemudian
         self.root.after(50, self.process_queue_to_gui)
 
     def execute_terminal_cmd(self, event):
-        """Melempar perintah yang kamu ketik ke dalam cmd.exe yang sedang jalan"""
         cmd = self.cmd_entry.get()
         self.cmd_entry.delete(0, tk.END)
         
         if self.shell_process and self.shell_process.poll() is None:
-            # Tulis perintah yang kamu ketik + Enter ke dalam cmd
             self.shell_process.stdin.write(cmd + "\n")
             self.shell_process.stdin.flush()
-            # Opsional: Bikin input box fokus lagi
             self.cmd_entry.focus()
 
-    # --- CORE GCLOUD LOGIC (Tombol-tombol GUI tetap pakai sistem independent biar ga ganggu cmd) ---
+    # --- CORE GCLOUD LOGIC ---
     def run_gcloud(self, command):
         try:
             result = subprocess.run(f"gcloud {command}", shell=True, capture_output=True, text=True)
@@ -157,7 +153,12 @@ class GCloudGUI:
         self.current_project_var.set("Loading...")
         self.project_combo.set('')
         self.project_combo['values'] = []
+        
+        # Gunakan block trace sementara agar tidak ter-trigger saat reset tulisan
+        self.search_var.trace_vdelete("write", self.search_var.trace_info()[0][1])
         self.search_var.set("Search Projects...")
+        self.search_var.trace_add("write", self.filter_projects)
+        
         threading.Thread(target=self._fetch_data_thread, daemon=True).start()
 
     def _fetch_data_thread(self):
@@ -201,7 +202,6 @@ class GCloudGUI:
             return
         
         self.current_project_var.set("Setting project...")
-        # Beri info di terminal bahwa tombol diklik
         self.term_output.config(state=tk.NORMAL)
         self.term_output.insert(tk.END, f"\n[GUI] Changing project to {selected}...\n")
         self.term_output.see(tk.END)
