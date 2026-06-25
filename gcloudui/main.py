@@ -1,5 +1,6 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
+import tkinter.scrolledtext as scrolledtext
 import subprocess
 import threading
 
@@ -7,36 +8,23 @@ class GCloudGUI:
     def __init__(self, root):
         self.root = root
         self.root.title("GCloud GUI Manager")
-        self.root.geometry("500x420")
-        self.root.configure(bg="#F3F3F3") # Warna background bersih ala Win11
+        self.root.geometry("550x700") # Dipertinggi untuk tempat terminal
+        self.root.configure(bg="#F3F3F3") 
         
-        # Konfigurasi Font Modern
+        # Konfigurasi Font
         self.font_title = ("Segoe UI", 16, "bold")
         self.font_label = ("Segoe UI", 10)
         self.font_project = ("Segoe UI", 11, "bold")
         self.font_btn = ("Segoe UI", 9)
+        self.font_term = ("Consolas", 9) # Font khas terminal
 
-        # Style untuk Tombol & Dropdown
+        # Style
         self.style = ttk.Style()
         self.style.theme_use('clam')
         
-        # Styling Tombol Utama (Biru)
-        self.style.configure("Accent.TButton", 
-                            font=self.font_btn, 
-                            foreground="white", 
-                            background="#0078D4", 
-                            borderwidth=0, 
-                            focuscolor="none",
-                            padding=8)
+        self.style.configure("Accent.TButton", font=self.font_btn, foreground="white", background="#0078D4", borderwidth=0, padding=8)
         self.style.map("Accent.TButton", background=[('active', '#005A9E')])
-
-        # Styling Tombol Sekunder (Putih/Abu)
-        self.style.configure("Secondary.TButton", 
-                            font=self.font_btn, 
-                            background="white", 
-                            padding=8)
-
-        # styling Dropdown
+        self.style.configure("Secondary.TButton", font=self.font_btn, background="white", padding=8)
         self.style.configure("TCombobox", padding=5, font=self.font_label)
 
         # --- DATA & STATE ---
@@ -44,162 +32,170 @@ class GCloudGUI:
         self.filtered_projects = []
 
         # --- UI ELEMENTS ---
-        
-        # Main Container with padding
         main_frame = tk.Frame(root, bg="#F3F3F3")
-        main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=(20, 10))
 
-        # 1. Title
-        tk.Label(main_frame, text="Google Cloud CLI Manager", font=self.font_title, bg="#F3F3F3", fg="#202020").pack(pady=(0, 20))
+        # 1. Header & Project Info
+        tk.Label(main_frame, text="Google Cloud CLI Manager", font=self.font_title, bg="#F3F3F3", fg="#202020").pack()
         
-        # 2. Current Project Info
         self.current_project_var = tk.StringVar()
         self.current_project_var.set("Loading...")
-        tk.Label(main_frame, text="Active Project:", font=self.font_label, bg="#F3F3F3", fg="#505050").pack()
-        tk.Label(main_frame, textvariable=self.current_project_var, font=self.font_project, bg="#F3F3F3", fg="#0078D4").pack(pady=(5, 20))
+        tk.Label(main_frame, text="Active Project:", font=self.font_label, bg="#F3F3F3", fg="#505050").pack(pady=(10, 0))
+        tk.Label(main_frame, textvariable=self.current_project_var, font=self.font_project, bg="#F3F3F3", fg="#0078D4").pack(pady=(0, 15))
         
-        # 3. Project Search & Selection Area
+        # 2. Search & Dropdown
         tk.Label(main_frame, text="Select/Change Project:", font=self.font_label, bg="#F3F3F3", fg="#505050").pack(anchor="w")
         
-        # --- Bagian Search Bar ---
         search_frame = tk.Frame(main_frame, bg="#F3F3F3")
         search_frame.pack(fill=tk.X, pady=(5, 0))
-        
-        # Ikon Search (pakai karakter unicode aja biar simpel)
         tk.Label(search_frame, text="🔍", font=self.font_label, bg="#F3F3F3").pack(side=tk.LEFT, padx=(5, 5))
         
         self.search_var = tk.StringVar()
-        self.search_var.trace_add("write", self.filter_projects) # Trigger filter saat ketik
+        self.search_var.trace_add("write", self.filter_projects)
         self.search_entry = ttk.Entry(search_frame, textvariable=self.search_var, font=self.font_label)
         self.search_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
-        # Placeholder text
         self.search_entry.insert(0, "Search Projects...")
         self.search_entry.bind('<FocusIn>', self.clear_placeholder)
         self.search_entry.bind('<FocusOut>', self.add_placeholder)
         
-        # --- Bagian Dropdown ---
         self.project_combo = ttk.Combobox(main_frame, font=self.font_label, state="readonly")
-        self.project_combo.pack(fill=tk.X, pady=(5, 20))
+        self.project_combo.pack(fill=tk.X, pady=(5, 15))
         
-        # 4. Buttons Frame (Side-by-side)
+        # 3. Buttons
         btn_frame = tk.Frame(main_frame, bg="#F3F3F3")
-        btn_frame.pack(pady=0)
-        
-        self.btn_set = ttk.Button(btn_frame, text="Set Active Project", command=self.set_project, style="Accent.TButton")
-        self.btn_set.grid(row=0, column=0, padx=10)
-        
-        ttk.Button(btn_frame, text="Refresh List", command=self.refresh_data, style="Secondary.TButton").grid(row=0, column=1, padx=10)
-        
-        # 5. Auth Frame (Satu tombol besar di bawah)
-        auth_frame = tk.Frame(main_frame, bg="#F3F3F3")
-        auth_frame.pack(fill=tk.X, pady=(40, 0))
-        
-        # Tombol Re-Auth dengan ikon kunci
-        ttk.Button(auth_frame, text="🔐 1-Click Re-Authenticate", command=self.reauthenticate, style="Secondary.TButton").pack(fill=tk.X)
+        btn_frame.pack()
+        ttk.Button(btn_frame, text="Set Active Project", command=self.set_project, style="Accent.TButton").grid(row=0, column=0, padx=5)
+        ttk.Button(btn_frame, text="Refresh List", command=self.refresh_data, style="Secondary.TButton").grid(row=0, column=1, padx=5)
+        ttk.Button(btn_frame, text="🔐 1-Click Re-Auth", command=self.reauthenticate, style="Secondary.TButton").grid(row=0, column=2, padx=5)
 
-        # Load initial data
+        # --- TERMINAL SECTION ---
+        term_container = tk.Frame(main_frame, bg="#1E1E1E", bd=1, relief=tk.SUNKEN)
+        term_container.pack(fill=tk.BOTH, expand=True, pady=(20, 0))
+
+        # Terminal Output Screen
+        self.term_output = scrolledtext.ScrolledText(term_container, bg="#1E1E1E", fg="#CCCCCC", font=self.font_term, state=tk.DISABLED, wrap=tk.WORD, bd=0)
+        self.term_output.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        
+        # Terminal Input Box
+        input_frame = tk.Frame(term_container, bg="#1E1E1E")
+        input_frame.pack(fill=tk.X, side=tk.BOTTOM, padx=5, pady=(0, 5))
+        tk.Label(input_frame, text="> ", bg="#1E1E1E", fg="#00FF00", font=self.font_term).pack(side=tk.LEFT)
+        
+        self.cmd_entry = tk.Entry(input_frame, bg="#1E1E1E", fg="#FFFFFF", font=self.font_term, insertbackground="white", bd=0)
+        self.cmd_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        self.cmd_entry.bind("<Return>", self.execute_terminal_cmd)
+
+        self.append_to_terminal("GCloud GUI Manager Terminal Initialized.\nType any command and press Enter.\n")
         self.refresh_data()
 
-    # --- LOGIC & HELPER FUNCTIONS ---
+    # --- TERMINAL LOGIC ---
+    def append_to_terminal(self, text):
+        self.term_output.config(state=tk.NORMAL)
+        self.term_output.insert(tk.END, text)
+        self.term_output.see(tk.END)
+        self.term_output.config(state=tk.DISABLED)
 
-    def run_gcloud(self, command):
-        """Helper to run gcloud commands"""
+    def execute_terminal_cmd(self, event):
+        cmd = self.cmd_entry.get()
+        if not cmd.strip():
+            return
+        
+        self.cmd_entry.delete(0, tk.END)
+        self.append_to_terminal(f"\n> {cmd}\n")
+        threading.Thread(target=self._run_terminal_thread, args=(cmd,), daemon=True).start()
+
+    def _run_terminal_thread(self, cmd):
         try:
-            # Gunakan shell=True agar gcloud ditemukan di PATH
+            result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+            output = result.stdout + result.stderr
+            if not output:
+                output = "[Command finished with no output]\n"
+        except Exception as e:
+            output = f"Error: {str(e)}\n"
+        
+        self.root.after(0, lambda: self.append_to_terminal(output))
+
+    # --- CORE GCLOUD LOGIC ---
+    def run_gcloud(self, command):
+        try:
             result = subprocess.run(f"gcloud {command}", shell=True, capture_output=True, text=True)
             return result.stdout.strip(), result.stderr.strip(), result.returncode
         except Exception as e:
             return "", str(e), 1
 
     def refresh_data(self):
-        """Fetch current project and project list"""
         self.current_project_var.set("Loading...")
         self.project_combo.set('')
         self.project_combo['values'] = []
-        self.search_var.set("Search Projects...") # Reset search
-        
-        # Gunakan thread agar GUI tidak freeze
+        self.search_var.set("Search Projects...")
         threading.Thread(target=self._fetch_data_thread, daemon=True).start()
 
     def _fetch_data_thread(self):
-        # Get active project
         stdout, stderr, code = self.run_gcloud("config get-value project")
         active_project = stdout if code == 0 and stdout else "None / Error"
         
-        # Get list of projects
         stdout_list, stderr_list, code_list = self.run_gcloud("projects list --format=\"value(projectId)\"")
         if code_list == 0:
-            self.all_projects = stdout_list.split('\n')
-            # Hapus baris kosong jika ada
-            self.all_projects = [p for p in self.all_projects if p.strip()]
+            self.all_projects = [p for p in stdout_list.split('\n') if p.strip()]
         else:
             self.all_projects = []
         
-        # Update UI di main thread
         self.root.after(0, lambda: self._update_ui_after_fetch(active_project))
 
     def _update_ui_after_fetch(self, active_project):
         self.current_project_var.set(active_project)
         self.filtered_projects = self.all_projects
         self.project_combo['values'] = self.filtered_projects
-        
         if active_project in self.filtered_projects:
             self.project_combo.set(active_project)
         elif self.filtered_projects:
             self.project_combo.current(0)
 
-    # --- LOGIKA FILTER PENCARIAN ---
     def filter_projects(self, *args):
         search_term = self.search_var.get().lower()
-        
-        # Jangan filter kalau masih teks placeholder
         if search_term == "search projects..." or not search_term:
             self.filtered_projects = self.all_projects
         else:
             self.filtered_projects = [p for p in self.all_projects if search_term in p.lower()]
         
-        # Update nilai dropdown
         self.project_combo['values'] = self.filtered_projects
-        
-        # Pilih item pertama hasil filter kalau ada
         if self.filtered_projects:
             self.project_combo.current(0)
         else:
-            self.project_combo.set('') # Kosongkan kalau nggak ketemu
+            self.project_combo.set('')
 
     def set_project(self):
         selected = self.project_combo.get()
         if not selected:
             messagebox.showwarning("Warning", "Pilih project terlebih dahulu!")
             return
-            
+        
         self.current_project_var.set("Setting project...")
+        self.append_to_terminal(f"\n[System] Changing project to {selected}...\n")
         threading.Thread(target=self._set_project_thread, args=(selected,), daemon=True).start()
 
     def _set_project_thread(self, project_id):
         stdout, stderr, code = self.run_gcloud(f"config set project {project_id}")
         if code == 0:
-            self.root.after(0, lambda: messagebox.showinfo("Success", f"Project berhasil diubah ke:\n{project_id}"))
-            # Reset search bar setelah sukses
+            self.root.after(0, lambda: self.append_to_terminal(f"[System] Success! Project changed to: {project_id}\n"))
             self.root.after(0, lambda: self.search_var.set("Search Projects..."))
             self.root.after(0, self.refresh_data)
         else:
-            self.root.after(0, lambda: messagebox.showerror("Error", f"Gagal mengubah project:\n{stderr}"))
+            self.root.after(0, lambda: self.append_to_terminal(f"[System] Error:\n{stderr}\n"))
             self.root.after(0, self.refresh_data)
 
     def reauthenticate(self):
-        answer = messagebox.askyesno("Re-Authenticate", "Ini akan membuka browser untuk login Google Cloud dan ADC. Lanjutkan?")
+        answer = messagebox.askyesno("Re-Authenticate", "Buka browser untuk login Google Cloud & ADC?")
         if answer:
+            self.append_to_terminal("\n[System] Starting authentication process...\n")
             threading.Thread(target=self._auth_thread, daemon=True).start()
 
     def _auth_thread(self):
-        # 1. Normal Auth Login
         self.run_gcloud("auth login")
-        # 2. Application Default Login (ADC)
         self.run_gcloud("auth application-default login")
-        self.root.after(0, lambda: messagebox.showinfo("Auth Selesai", "Proses otentikasi selesai.\nCek browser Anda."))
+        self.root.after(0, lambda: self.append_to_terminal("[System] Authentication process finished.\n"))
+        self.root.after(0, lambda: messagebox.showinfo("Auth Selesai", "Proses otentikasi selesai."))
 
-    # Helper untuk placeholder
     def clear_placeholder(self, event):
         if self.search_var.get() == "Search Projects...":
             self.search_var.set("")
