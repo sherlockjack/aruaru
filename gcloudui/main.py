@@ -3,13 +3,15 @@ from tkinter import ttk, messagebox
 import tkinter.scrolledtext as scrolledtext
 import subprocess
 import threading
+import queue
 import sys
+import os
 
 class GCloudGUI:
     def __init__(self, root):
         self.root = root
         self.root.title("GCloud GUI Manager")
-        self.root.geometry("600x700") 
+        self.root.geometry("650x750") 
         self.root.configure(bg="#F3F3F3") 
         
         self.font_title = ("Segoe UI", 16, "bold")
@@ -26,16 +28,13 @@ class GCloudGUI:
         self.style.configure("Secondary.TButton", font=self.font_btn, background="white", padding=8)
         self.style.configure("TCombobox", padding=5, font=self.font_label)
 
-        # --- DATA & STATE ---
         self.all_projects = []
         self.filtered_projects = []
-        self.current_process = None # Menyimpan proses terminal yang sedang berjalan
-
-        # --- UI ELEMENTS ---
+        
+        # --- UI ELEMENTS --- (Sama seperti sebelumnya)
         main_frame = tk.Frame(root, bg="#F3F3F3")
         main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=(20, 10))
 
-        # 1. Header & Project Info
         tk.Label(main_frame, text="Google Cloud CLI Manager", font=self.font_title, bg="#F3F3F3", fg="#202020").pack()
         
         self.current_project_var = tk.StringVar()
@@ -43,7 +42,6 @@ class GCloudGUI:
         tk.Label(main_frame, text="Active Project:", font=self.font_label, bg="#F3F3F3", fg="#505050").pack(pady=(10, 0))
         tk.Label(main_frame, textvariable=self.current_project_var, font=self.font_project, bg="#F3F3F3", fg="#0078D4").pack(pady=(0, 15))
         
-        # 2. Search & Dropdown
         tk.Label(main_frame, text="Select/Change Project:", font=self.font_label, bg="#F3F3F3", fg="#505050").pack(anchor="w")
         
         search_frame = tk.Frame(main_frame, bg="#F3F3F3")
@@ -61,7 +59,6 @@ class GCloudGUI:
         self.project_combo = ttk.Combobox(main_frame, font=self.font_label, state="readonly")
         self.project_combo.pack(fill=tk.X, pady=(5, 15))
         
-        # 3. Buttons
         btn_frame = tk.Frame(main_frame, bg="#F3F3F3")
         btn_frame.pack()
         ttk.Button(btn_frame, text="Set Active Project", command=self.set_project, style="Accent.TButton").grid(row=0, column=0, padx=5)
@@ -77,70 +74,78 @@ class GCloudGUI:
         
         input_frame = tk.Frame(term_container, bg="#1E1E1E")
         input_frame.pack(fill=tk.X, side=tk.BOTTOM, padx=5, pady=(0, 5))
-        tk.Label(input_frame, text="> ", bg="#1E1E1E", fg="#00FF00", font=self.font_term).pack(side=tk.LEFT)
         
-        self.cmd_entry = tk.Entry(input_frame, bg="#1E1E1E", fg="#FFFFFF", font=self.font_term, insertbackground="white", bd=0)
-        self.cmd_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        # Label ">" dihilangkan karena prompt asli dari cmd (C:\...>) bakal muncul di output layar atas
+        self.cmd_entry = tk.Entry(input_frame, bg="#333333", fg="#00FF00", font=self.font_term, insertbackground="white", bd=1)
+        self.cmd_entry.pack(side=LEFT, fill=tk.X, expand=True)
         self.cmd_entry.bind("<Return>", self.execute_terminal_cmd)
 
-        self.append_to_terminal("GCloud Live Terminal Ready.\nDeployments and live logs will stream here.\n")
         self.refresh_data()
+        
+        # --- START REAL NATIVE TERMINAL SESSION ---
+        self.output_queue = queue.Queue()
+        self.start_persistent_shell()
+        self.root.after(50, self.process_queue_to_gui) # Polling update GUI
 
-    # --- LIVE TERMINAL LOGIC ---
-    def append_to_terminal(self, text):
-        self.term_output.config(state=tk.NORMAL)
-        self.term_output.insert(tk.END, text)
-        self.term_output.see(tk.END)
-        self.term_output.config(state=tk.DISABLED)
+    # --- PERSISTENT NATIVE SHELL LOGIC ---
+    def start_persistent_shell(self):
+        """Memulai satu proses cmd.exe asli yang hidup terus selama GUI terbuka"""
+        kwargs = {}
+        if sys.platform == "win32":
+            kwargs['creationflags'] = 0x08000000 # Menyembunyikan jendela cmd asli
+
+        # Gunakan cmd.exe bawaan sistem
+        shell_exe = os.environ.get("COMSPEC", "cmd.exe")
+        
+        self.shell_process = subprocess.Popen(
+            shell_exe,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+            **kwargs
+        )
+        
+        # Baca output cmd secara live dari thread terpisah
+        threading.Thread(target=self._read_shell_output, daemon=True).start()
+
+    def _read_shell_output(self):
+        """Membaca setiap karakter dari cmd.exe (termasuk prompt) lalu kirim ke queue"""
+        while True:
+            char = self.shell_process.stdout.read(1)
+            if not char: # Jika shell mati
+                break
+            self.output_queue.put(char)
+
+    def process_queue_to_gui(self):
+        """Memindahkan text dari antrean ke dalam ScrolledText tanpa bikin GUI hang"""
+        chars = []
+        while not self.output_queue.empty():
+            chars.append(self.output_queue.get())
+            
+        if chars:
+            self.term_output.config(state=tk.NORMAL)
+            self.term_output.insert(tk.END, "".join(chars))
+            self.term_output.see(tk.END)
+            self.term_output.config(state=tk.DISABLED)
+            
+        # Panggil lagi fungsi ini 50 milidetik kemudian
+        self.root.after(50, self.process_queue_to_gui)
 
     def execute_terminal_cmd(self, event):
+        """Melempar perintah yang kamu ketik ke dalam cmd.exe yang sedang jalan"""
         cmd = self.cmd_entry.get()
-        if not cmd:
-            return
-        
         self.cmd_entry.delete(0, tk.END)
         
-        # Jika ada command yang lagi jalan (misal nunggu Y/n)
-        if self.current_process and self.current_process.poll() is None:
-            self.append_to_terminal(f"{cmd}\n") # Echo input user
-            try:
-                # Kirim input ke command yang lagi jalan
-                self.current_process.stdin.write(cmd + "\n")
-                self.current_process.stdin.flush()
-            except Exception as e:
-                self.append_to_terminal(f"\n[System Error writing to stdin: {e}]\n")
-        else:
-            # Mulai command baru
-            self.append_to_terminal(f"\n> {cmd}\n")
-            threading.Thread(target=self._run_live_terminal_thread, args=(cmd,), daemon=True).start()
+        if self.shell_process and self.shell_process.poll() is None:
+            # Tulis perintah yang kamu ketik + Enter ke dalam cmd
+            self.shell_process.stdin.write(cmd + "\n")
+            self.shell_process.stdin.flush()
+            # Opsional: Bikin input box fokus lagi
+            self.cmd_entry.focus()
 
-    def _run_live_terminal_thread(self, cmd):
-        try:
-            # Gunakan Popen untuk streaming output real-time dan buka jalur input (stdin)
-            self.current_process = subprocess.Popen(
-                cmd,
-                shell=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                stdin=subprocess.PIPE,
-                text=True,
-                bufsize=1, # Line buffered
-                universal_newlines=True
-            )
-            
-            # Baca output baris demi baris saat proses berjalan
-            for line in self.current_process.stdout:
-                self.root.after(0, lambda l=line: self.append_to_terminal(l))
-                
-            self.current_process.wait()
-            self.root.after(0, lambda: self.append_to_terminal(f"[Process finished with code {self.current_process.returncode}]\n"))
-            self.current_process = None
-            
-        except Exception as e:
-            self.root.after(0, lambda err=str(e): self.append_to_terminal(f"Error: {err}\n"))
-            self.current_process = None
-
-    # --- CORE GCLOUD LOGIC ---
+    # --- CORE GCLOUD LOGIC (Tombol-tombol GUI tetap pakai sistem independent biar ga ganggu cmd) ---
     def run_gcloud(self, command):
         try:
             result = subprocess.run(f"gcloud {command}", shell=True, capture_output=True, text=True)
@@ -196,29 +201,30 @@ class GCloudGUI:
             return
         
         self.current_project_var.set("Setting project...")
-        self.append_to_terminal(f"\n[System] Changing project to {selected}...\n")
+        # Beri info di terminal bahwa tombol diklik
+        self.term_output.config(state=tk.NORMAL)
+        self.term_output.insert(tk.END, f"\n[GUI] Changing project to {selected}...\n")
+        self.term_output.see(tk.END)
+        self.term_output.config(state=tk.DISABLED)
+        
         threading.Thread(target=self._set_project_thread, args=(selected,), daemon=True).start()
 
     def _set_project_thread(self, project_id):
         stdout, stderr, code = self.run_gcloud(f"config set project {project_id}")
         if code == 0:
-            self.root.after(0, lambda: self.append_to_terminal(f"[System] Success! Project changed to: {project_id}\n"))
             self.root.after(0, lambda: self.search_var.set("Search Projects..."))
             self.root.after(0, self.refresh_data)
         else:
-            self.root.after(0, lambda: self.append_to_terminal(f"[System] Error:\n{stderr}\n"))
             self.root.after(0, self.refresh_data)
 
     def reauthenticate(self):
         answer = messagebox.askyesno("Re-Authenticate", "Buka browser untuk login Google Cloud & ADC?")
         if answer:
-            self.append_to_terminal("\n[System] Starting authentication process...\n")
             threading.Thread(target=self._auth_thread, daemon=True).start()
 
     def _auth_thread(self):
         self.run_gcloud("auth login")
         self.run_gcloud("auth application-default login")
-        self.root.after(0, lambda: self.append_to_terminal("[System] Authentication process finished.\n"))
         self.root.after(0, lambda: messagebox.showinfo("Auth Selesai", "Proses otentikasi selesai."))
 
     def clear_placeholder(self, event):
