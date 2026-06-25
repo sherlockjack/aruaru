@@ -78,15 +78,24 @@ class GCloudGUI:
         term_container = tk.Frame(main_frame, bg="#1E1E1E", bd=1, relief=tk.SUNKEN)
         term_container.pack(fill=tk.BOTH, expand=True, pady=(20, 0))
 
+        # Layar Output (Hitam Gede)
         self.term_output = scrolledtext.ScrolledText(term_container, bg="#1E1E1E", fg="#CCCCCC", font=self.font_term, state=tk.DISABLED, wrap=tk.WORD, bd=0)
         self.term_output.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         
-        input_frame = tk.Frame(term_container, bg="#1E1E1E")
+        # Area Input di Bawah (Dibuat lebih jelas!)
+        input_frame = tk.Frame(term_container, bg="#2D2D2D")
         input_frame.pack(fill=tk.X, side=tk.BOTTOM, padx=5, pady=(0, 5))
         
-        self.cmd_entry = tk.Entry(input_frame, bg="#333333", fg="#00FF00", font=self.font_term, insertbackground="white", bd=1)
-        self.cmd_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        # Label biar ketahuan tempat ngetiknya
+        tk.Label(input_frame, text=" ⌨️ Input > ", bg="#2D2D2D", fg="#00FF00", font=self.font_term).pack(side=tk.LEFT)
+        
+        self.cmd_entry = tk.Entry(input_frame, bg="#1E1E1E", fg="#FFFFFF", font=self.font_term, insertbackground="white", bd=0)
+        self.cmd_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, pady=2)
         self.cmd_entry.bind("<Return>", self.execute_terminal_cmd)
+
+        # QoL Magic: Kalau user maksa ngetik di layar hitam, otomatis pindahin kursor ke kotak bawah!
+        self.term_output.bind("<Key>", self._redirect_typing)
+        self.term_output.bind("<Button-1>", lambda e: self.cmd_entry.focus_set())
 
         self.refresh_data()
         
@@ -94,6 +103,14 @@ class GCloudGUI:
         self.output_queue = queue.Queue()
         self.start_persistent_shell()
         self.root.after(50, self.process_queue_to_gui) 
+
+    # --- QoL TERMINAL MAGIC ---
+    def _redirect_typing(self, event):
+        """Otomatis pindah ke kotak input kalau user ngetik di layar output"""
+        if event.char and event.keysym not in ('Control_L', 'Control_R', 'Alt_L', 'Alt_R'):
+            self.cmd_entry.focus_set()
+            self.cmd_entry.insert(tk.END, event.char)
+            return "break"
 
     # --- PERSISTENT NATIVE SHELL LOGIC ---
     def start_persistent_shell(self):
@@ -157,7 +174,6 @@ class GCloudGUI:
         self.project_combo.set('')
         self.project_combo['values'] = []
         
-        # Pakai saklar agar saat nulis teks ini, fungsi filter nggak ter-trigger error
         self._ignore_trace = True
         self.search_var.set("Search Projects...")
         self._ignore_trace = False
@@ -186,7 +202,6 @@ class GCloudGUI:
             self.project_combo.current(0)
 
     def filter_projects(self, *args):
-        # Kalau saklar nyala, batalkan pencarian sementara
         if getattr(self, '_ignore_trace', False):
             return
             
