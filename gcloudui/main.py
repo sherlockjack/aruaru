@@ -31,6 +31,9 @@ class GCloudGUI:
         self.all_projects = []
         self.filtered_projects = []
         
+        # Saklar penahan trigger pencarian
+        self._ignore_trace = False
+        
         # --- UI ELEMENTS ---
         main_frame = tk.Frame(root, bg="#F3F3F3")
         main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=(20, 10))
@@ -48,17 +51,18 @@ class GCloudGUI:
         search_frame.pack(fill=tk.X, pady=(5, 0))
         tk.Label(search_frame, text="🔍", font=self.font_label, bg="#F3F3F3").pack(side=tk.LEFT, padx=(5, 5))
         
-        # FIX ERROR 1: Buat project_combo DULU sebelum bikin trigger search_var
         self.project_combo = ttk.Combobox(main_frame, font=self.font_label, state="readonly")
         
         self.search_var = tk.StringVar()
         self.search_entry = ttk.Entry(search_frame, textvariable=self.search_var, font=self.font_label)
         self.search_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        
+        # Atur teks tanpa trigger
+        self._ignore_trace = True
         self.search_entry.insert(0, "Search Projects...")
+        self._ignore_trace = False
         
-        # Trigger dipasang SETELAH placeholder terisi, biar nggak error
         self.search_var.trace_add("write", self.filter_projects)
-        
         self.search_entry.bind('<FocusIn>', self.clear_placeholder)
         self.search_entry.bind('<FocusOut>', self.add_placeholder)
         
@@ -80,7 +84,6 @@ class GCloudGUI:
         input_frame = tk.Frame(term_container, bg="#1E1E1E")
         input_frame.pack(fill=tk.X, side=tk.BOTTOM, padx=5, pady=(0, 5))
         
-        # FIX ERROR 2: Pakai tk.LEFT, bukan LEFT
         self.cmd_entry = tk.Entry(input_frame, bg="#333333", fg="#00FF00", font=self.font_term, insertbackground="white", bd=1)
         self.cmd_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
         self.cmd_entry.bind("<Return>", self.execute_terminal_cmd)
@@ -154,10 +157,10 @@ class GCloudGUI:
         self.project_combo.set('')
         self.project_combo['values'] = []
         
-        # Gunakan block trace sementara agar tidak ter-trigger saat reset tulisan
-        self.search_var.trace_vdelete("write", self.search_var.trace_info()[0][1])
+        # Pakai saklar agar saat nulis teks ini, fungsi filter nggak ter-trigger error
+        self._ignore_trace = True
         self.search_var.set("Search Projects...")
-        self.search_var.trace_add("write", self.filter_projects)
+        self._ignore_trace = False
         
         threading.Thread(target=self._fetch_data_thread, daemon=True).start()
 
@@ -183,6 +186,10 @@ class GCloudGUI:
             self.project_combo.current(0)
 
     def filter_projects(self, *args):
+        # Kalau saklar nyala, batalkan pencarian sementara
+        if getattr(self, '_ignore_trace', False):
+            return
+            
         search_term = self.search_var.get().lower()
         if search_term == "search projects..." or not search_term:
             self.filtered_projects = self.all_projects
@@ -229,11 +236,15 @@ class GCloudGUI:
 
     def clear_placeholder(self, event):
         if self.search_var.get() == "Search Projects...":
+            self._ignore_trace = True
             self.search_var.set("")
+            self._ignore_trace = False
             
     def add_placeholder(self, event):
         if not self.search_var.get():
+            self._ignore_trace = True
             self.search_var.set("Search Projects...")
+            self._ignore_trace = False
 
 def main():
     root = tk.Tk()
